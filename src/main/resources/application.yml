@@ -31,6 +31,10 @@ app:
     api-key: ${GEMINI_API_KEY}
     base-url: https://generativelanguage.googleapis.com
 
+jwt:
+  secret: ${JWT_SECRET:mySecretKeyForJWTTokenGenerationAndValidationPurposesOnly123456789}
+  expiration: 3600000  # 1 hour in milliseconds
+
 logging:
   level:
     org.springframework.ai: DEBUG
