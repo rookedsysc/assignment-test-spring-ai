@@ -1,0 +1,37 @@
+spring:
+  config:
+    import: optional:file:.env[.properties]
+  ai:
+    openai:
+      api-key: ${OPEN_AI}
+      chat:
+        options:
+          model: gpt-5.2
+  main:
+    allow-bean-definition-overriding: true
+  r2dbc:
+    url: r2dbc:postgresql://localhost:5432/assignment_test_db
+    username: root
+    password: 1234
+  sql:
+    init:
+      mode: always
+
+app:
+  openai:
+    api-key: ${OPEN_AI}
+    chat:
+      model: gpt-5.2
+  perplexity:
+    api-key: ${PERPLEXITY_API_KEY}
+    base-url: https://api.perplexity.ai
+    chat:
+      model: sonar-reasoning-pro
+  gemini:
+    api-key: ${GEMINI_API_KEY}
+    base-url: https://generativelanguage.googleapis.com
+
+logging:
+  level:
+    org.springframework.ai: DEBUG
+    io.modelcontextprotocol: DEBUG
