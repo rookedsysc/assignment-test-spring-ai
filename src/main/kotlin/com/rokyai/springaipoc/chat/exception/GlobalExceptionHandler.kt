@@ -1,11 +1,17 @@
 package com.rokyai.springaipoc.chat.exception
 
+import com.fasterxml.jackson.module.kotlin.MissingKotlinParameterException
+import com.rokyai.springaipoc.user.exception.DuplicateEmailException
+import com.rokyai.springaipoc.user.exception.InvalidPasswordException
+import com.rokyai.springaipoc.user.exception.UserNotFoundException
+import org.springframework.core.codec.DecodingException
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.ExceptionHandler
 import org.springframework.web.bind.annotation.RestControllerAdvice
 import org.springframework.web.bind.support.WebExchangeBindException
 import org.springframework.web.server.ServerWebExchange
+import org.springframework.web.server.ServerWebInputException
 
 /**
  * 전역 예외 처리 핸들러
@@ -14,6 +20,70 @@ import org.springframework.web.server.ServerWebExchange
  */
 @RestControllerAdvice
 class GlobalExceptionHandler {
+
+    /**
+     * ServerWebInputException 처리
+     *
+     * WebFlux에서 잘못된 입력 데이터 처리 시 발생하는 예외를 처리합니다.
+     *
+     * @param ex 발생한 예외
+     * @param exchange 요청 정보를 포함한 ServerWebExchange
+     * @return 400 Bad Request 응답
+     */
+    @ExceptionHandler(ServerWebInputException::class)
+    fun handleServerWebInputException(
+        ex: ServerWebInputException,
+        exchange: ServerWebExchange
+    ): ResponseEntity<ErrorResponse> {
+        val cause = ex.cause
+        val message = when (cause) {
+            is MissingKotlinParameterException -> {
+                val fieldName = cause.parameter.name ?: "unknown"
+                "필수 필드가 누락되었습니다: $fieldName"
+            }
+            else -> ex.reason ?: "잘못된 요청 데이터입니다."
+        }
+
+        val errorResponse = ErrorResponse(
+            status = HttpStatus.BAD_REQUEST.value(),
+            error = HttpStatus.BAD_REQUEST.reasonPhrase,
+            message = message,
+            path = exchange.request.path.value()
+        )
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(errorResponse)
+    }
+
+    /**
+     * DecodingException 처리
+     *
+     * JSON 역직렬화 실패 시 발생하는 예외를 처리합니다.
+     *
+     * @param ex 발생한 예외
+     * @param exchange 요청 정보를 포함한 ServerWebExchange
+     * @return 400 Bad Request 응답
+     */
+    @ExceptionHandler(DecodingException::class)
+    fun handleDecodingException(
+        ex: DecodingException,
+        exchange: ServerWebExchange
+    ): ResponseEntity<ErrorResponse> {
+        val cause = ex.cause
+        val message = when (cause) {
+            is MissingKotlinParameterException -> {
+                val fieldName = cause.parameter.name ?: "unknown"
+                "필수 필드가 누락되었습니다: $fieldName"
+            }
+            else -> "JSON 형식이 올바르지 않습니다."
+        }
+
+        val errorResponse = ErrorResponse(
+            status = HttpStatus.BAD_REQUEST.value(),
+            error = HttpStatus.BAD_REQUEST.reasonPhrase,
+            message = message,
+            path = exchange.request.path.value()
+        )
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(errorResponse)
+    }
 
     /**
      * WebExchangeBindException 처리
@@ -86,6 +156,75 @@ class GlobalExceptionHandler {
             path = exchange.request.path.value()
         )
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse)
+    }
+
+    /**
+     * DuplicateEmailException 처리
+     *
+     * 이미 존재하는 이메일로 회원가입 시도 시 발생하는 예외를 처리합니다.
+     *
+     * @param ex 발생한 예외
+     * @param exchange 요청 정보를 포함한 ServerWebExchange
+     * @return 409 Conflict 응답
+     */
+    @ExceptionHandler(DuplicateEmailException::class)
+    fun handleDuplicateEmailException(
+        ex: DuplicateEmailException,
+        exchange: ServerWebExchange
+    ): ResponseEntity<ErrorResponse> {
+        val errorResponse = ErrorResponse(
+            status = HttpStatus.CONFLICT.value(),
+            error = HttpStatus.CONFLICT.reasonPhrase,
+            message = ex.message ?: "이미 존재하는 이메일입니다.",
+            path = exchange.request.path.value()
+        )
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(errorResponse)
+    }
+
+    /**
+     * UserNotFoundException 처리
+     *
+     * 존재하지 않는 사용자 조회 시 발생하는 예외를 처리합니다.
+     *
+     * @param ex 발생한 예외
+     * @param exchange 요청 정보를 포함한 ServerWebExchange
+     * @return 404 Not Found 응답
+     */
+    @ExceptionHandler(UserNotFoundException::class)
+    fun handleUserNotFoundException(
+        ex: UserNotFoundException,
+        exchange: ServerWebExchange
+    ): ResponseEntity<ErrorResponse> {
+        val errorResponse = ErrorResponse(
+            status = HttpStatus.NOT_FOUND.value(),
+            error = HttpStatus.NOT_FOUND.reasonPhrase,
+            message = ex.message ?: "사용자를 찾을 수 없습니다.",
+            path = exchange.request.path.value()
+        )
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(errorResponse)
+    }
+
+    /**
+     * InvalidPasswordException 처리
+     *
+     * 잘못된 패스워드로 로그인 시도 시 발생하는 예외를 처리합니다.
+     *
+     * @param ex 발생한 예외
+     * @param exchange 요청 정보를 포함한 ServerWebExchange
+     * @return 401 Unauthorized 응답
+     */
+    @ExceptionHandler(InvalidPasswordException::class)
+    fun handleInvalidPasswordException(
+        ex: InvalidPasswordException,
+        exchange: ServerWebExchange
+    ): ResponseEntity<ErrorResponse> {
+        val errorResponse = ErrorResponse(
+            status = HttpStatus.UNAUTHORIZED.value(),
+            error = HttpStatus.UNAUTHORIZED.reasonPhrase,
+            message = ex.message ?: "패스워드가 일치하지 않습니다.",
+            path = exchange.request.path.value()
+        )
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(errorResponse)
     }
 
     /**

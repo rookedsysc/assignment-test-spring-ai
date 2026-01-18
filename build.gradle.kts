@@ -41,6 +41,14 @@ dependencies {
     // Validation
     implementation("org.springframework.boot:spring-boot-starter-validation")
 
+    // JWT
+    implementation("io.jsonwebtoken:jjwt-api:0.12.6")
+    runtimeOnly("io.jsonwebtoken:jjwt-impl:0.12.6")
+    runtimeOnly("io.jsonwebtoken:jjwt-jackson:0.12.6")
+
+    // Security
+    implementation("org.springframework.boot:spring-boot-starter-security")
+
     runtimeOnly("org.postgresql:postgresql")
     runtimeOnly("org.postgresql:r2dbc-postgresql")
 //    testImplementation("org.springframework.boot:spring-boot-starter-data-r2dbc-test")
@@ -50,6 +58,9 @@ dependencies {
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test")
     testImplementation("io.mockk:mockk:1.13.13")
     testImplementation("com.ninja-squad:springmockk:4.0.2")
+    testImplementation("org.testcontainers:postgresql:1.19.3")
+    testImplementation("org.testcontainers:r2dbc:1.19.3")
+    testImplementation("org.testcontainers:junit-jupiter:1.19.3")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 
