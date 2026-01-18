@@ -1,102 +1,305 @@
 package com.rokyai.springaipoc.chat.service
 
-import com.rokyai.springaipoc.chat.dto.ChatRequest
-import com.rokyai.springaipoc.chat.dto.ChatResponse
+import com.rokyai.springaipoc.chat.dto.*
 import com.rokyai.springaipoc.chat.entity.ChatHistory
+import com.rokyai.springaipoc.chat.entity.Thread
+import com.rokyai.springaipoc.chat.enums.SortDirection
+import com.rokyai.springaipoc.chat.factory.ChatClientFactory
 import com.rokyai.springaipoc.chat.repository.ChatHistoryRepository
+import com.rokyai.springaipoc.chat.repository.ThreadRepository
 import kotlinx.coroutines.reactor.awaitSingle
+import kotlinx.coroutines.reactor.awaitSingleOrNull
 import org.springframework.ai.chat.client.ChatClient
-import org.springframework.ai.tool.ToolCallbackProvider
-import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.stereotype.Service
 import reactor.core.publisher.Flux
 import reactor.core.publisher.Mono
 import reactor.core.scheduler.Schedulers
 import java.time.OffsetDateTime
 import java.time.ZoneOffset
+import java.util.UUID
 
 /**
  * ChatGPT와 통신하는 서비스
  *
  * Spring AI의 ChatClient를 사용하여 OpenAI API와 비동기 통신을 수행합니다.
- * Context7 MCP를 통합하여 라이브러리 문서를 자동으로 검색하고 더 정확한 답변을 제공합니다.
- * WebFlux 환경에서 Coroutines를 활용하여 Non-blocking 방식으로 동작합니다.
+ * 스레드 기반 대화 관리 및 다양한 AI 제공자를 지원합니다.
  */
 @Service
 class ChatService(
     private val chatHistoryRepository: ChatHistoryRepository,
-    @Qualifier("openAiChatClient") private val openAiChatClient: ChatClient,
+    private val threadRepository: ThreadRepository,
+    private val chatClientFactory: ChatClientFactory
 ) {
+    companion object {
+        const val THREAD_TIMEOUT_MINUTES = 30L
+    }
+
     /**
-     * ChatGPT에게 메시지를 전송하고 응답을 받습니다.
+     * AI에게 메시지를 전송하고 응답을 받습니다.
      *
-     * Context7 MCP를 통해 라이브러리 관련 질문에 대한 최신 문서를 자동으로 검색합니다.
-     * WebFlux 환경에서 blocking 호출을 피하기 위해 boundedElastic 스케줄러를 사용합니다.
+     * isStreaming 파라미터에 따라 완전한 응답 또는 스트리밍 응답을 결정합니다.
+     * 스레드 관리 로직(30분 규칙)을 적용하여 대화 컨텍스트를 유지합니다.
      *
      * @param request 사용자가 보낼 메시지를 포함한 요청 객체
-     * @return ChatGPT의 응답 메시지를 포함한 응답 객체
+     * @param userId 사용자 ID (Spring Security에서 추출)
+     * @return AI의 응답 메시지를 포함한 응답 객체
      */
-    suspend fun chat(request: ChatRequest): ChatResponse {
-        // ChatClient를 사용하여 Context7 MCP 도구를 자동으로 활용
-        // AI가 필요시 자동으로 라이브러리 문서를 검색하여 더 정확한 답변을 생성합니다
+    suspend fun chat(request: ChatRequest, userId: UUID): ChatResponse {
+        val chatClient = chatClientFactory.getClient(request.provider)
+        val chatOptions = chatClientFactory.getOptions(request.provider)
+
+        val thread = getOrCreateThread(userId.toString())
+
+        val previousChats = chatHistoryRepository
+            .findAllByThreadIdOrderByCreatedAtAsc(thread.id!!)
+            .collectList()
+            .awaitSingle()
+
         val generatedMessage = Mono.fromCallable {
-            openAiChatClient.prompt()
+            val promptBuilder = chatClient.prompt()
+                .options(chatOptions)
+
+            if (previousChats.isNotEmpty()) {
+                previousChats.forEach { chat ->
+                    promptBuilder
+                        .user(chat.userMessage)
+                }
+            }
+
+            promptBuilder
                 .user(request.message)
                 .call()
                 .content()
         }
             .subscribeOn(Schedulers.boundedElastic())
             .awaitSingle()
-            ?: throw IllegalStateException("ChatGPT 응답 생성 실패")
+            ?: throw IllegalStateException("AI 응답 생성 실패")
 
-        // 채팅 기록을 데이터베이스에 저장
         val chatHistory = ChatHistory(
+            threadId = thread.id,
+            userId = userId.toString(),
             userMessage = request.message,
             assistantMessage = generatedMessage,
             createdAt = OffsetDateTime.now(ZoneOffset.UTC)
         )
         chatHistoryRepository.save(chatHistory).awaitSingle()
 
+        threadRepository.save(
+            thread.copy(updatedAt = OffsetDateTime.now(ZoneOffset.UTC))
+        ).awaitSingle()
+
         return ChatResponse(message = generatedMessage)
     }
 
     /**
-     * ChatGPT에게 메시지를 전송하고 스트리밍 방식으로 응답을 받습니다.
+     * AI에게 메시지를 전송하고 스트리밍 방식으로 응답을 받습니다.
      *
-     * Context7 MCP를 통해 라이브러리 관련 질문에 대한 최신 문서를 자동으로 검색합니다.
      * SSE (Server-Sent Events)를 통해 실시간으로 생성되는 텍스트를 전송합니다.
-     * 사용자는 전체 응답이 완료될 때까지 기다리지 않고 생성되는 즉시 텍스트를 받을 수 있습니다.
+     * 스레드 관리 로직을 적용하여 대화 컨텍스트를 유지합니다.
      *
      * @param request 사용자가 보낼 메시지를 포함한 요청 객체
-     * @return ChatGPT의 응답 메시지 스트림 (Flux<String>)
+     * @param userId 사용자 ID (Spring Security에서 추출)
+     * @return AI의 응답 메시지 스트림
      */
-    fun chatStream(request: ChatRequest): Flux<String> {
+    fun chatStream(request: ChatRequest, userId: UUID): Flux<String> {
         val messageBuilder = StringBuilder()
+        val userIdString = userId.toString()
 
-        return Flux.defer {
-            openAiChatClient.prompt()
-                .user(request.message)
-                .stream()
-                .content()
+        return Mono.fromCallable {
+            val chatClient = chatClientFactory.getClient(request.provider)
+            chatClient
         }
-            .filter { text ->
-                text.isNotBlank()
-            }
-            .doOnNext { text ->
-                // 스트리밍되는 각 텍스트 청크를 수집
-                messageBuilder.append(text)
-            }
-            .doOnComplete {
-                // 스트리밍이 완료되면 채팅 기록을 데이터베이스에 저장
-                val chatHistory = ChatHistory(
-                    userMessage = request.message,
-                    assistantMessage = messageBuilder.toString(),
-                    createdAt = OffsetDateTime.now(ZoneOffset.UTC)
-                )
-                chatHistoryRepository.save(chatHistory).subscribe()
+            .flatMapMany { chatClient ->
+                val chatOptions = chatClientFactory.getOptions(request.provider)
+
+                threadRepository.findLatestByUserId(userIdString)
+                    .switchIfEmpty(Mono.defer {
+                        val newThread = Thread(
+                            userId = userIdString,
+                            createdAt = OffsetDateTime.now(ZoneOffset.UTC),
+                            updatedAt = OffsetDateTime.now(ZoneOffset.UTC)
+                        )
+                        threadRepository.save(newThread)
+                    })
+                    .flatMapMany { thread ->
+                        val now = OffsetDateTime.now(ZoneOffset.UTC)
+                        val needsNewThread = thread.updatedAt
+                            .plusMinutes(THREAD_TIMEOUT_MINUTES)
+                            .isBefore(now)
+
+                        val activeThread = if (needsNewThread) {
+                            val newThread = Thread(
+                                userId = userIdString,
+                                createdAt = now,
+                                updatedAt = now
+                            )
+                            threadRepository.save(newThread).block()!!
+                        } else {
+                            thread
+                        }
+
+                        chatHistoryRepository
+                            .findAllByThreadIdOrderByCreatedAtAsc(activeThread.id!!)
+                            .collectList()
+                            .flatMapMany { previousChats ->
+                                Flux.defer {
+                                    val promptBuilder = chatClient.prompt()
+                                        .options(chatOptions)
+
+                                    if (previousChats.isNotEmpty()) {
+                                        previousChats.forEach { chat ->
+                                            promptBuilder.user(chat.userMessage)
+                                        }
+                                    }
+
+                                    promptBuilder
+                                        .user(request.message)
+                                        .stream()
+                                        .content()
+                                }
+                                    .filter { text -> text.isNotBlank() }
+                                    .doOnNext { text -> messageBuilder.append(text) }
+                                    .doOnComplete {
+                                        val chatHistory = ChatHistory(
+                                            threadId = activeThread.id,
+                                            userId = userIdString,
+                                            userMessage = request.message,
+                                            assistantMessage = messageBuilder.toString(),
+                                            createdAt = OffsetDateTime.now(ZoneOffset.UTC)
+                                        )
+                                        chatHistoryRepository.save(chatHistory).subscribe()
+
+                                        threadRepository.save(
+                                            activeThread.copy(updatedAt = OffsetDateTime.now(ZoneOffset.UTC))
+                                        ).subscribe()
+                                    }
+                            }
+                    }
             }
             .onErrorResume { error ->
-                Flux.just("Error: ${error.message ?: "알 수 없는 오류가 발생했습니다."}")
+                val errorMessage = error.message ?: "알 수 없는 오류가 발생했습니다."
+                Flux.just("Error: $errorMessage")
             }
+    }
+
+    /**
+     * 채팅 히스토리를 조회합니다.
+     *
+     * 스레드 단위로 그룹화되어 반환되며, 페이지네이션과 정렬을 지원합니다.
+     * 일반 사용자는 본인의 히스토리만, 관리자는 모든 히스토리를 조회할 수 있습니다.
+     *
+     * @param request 조회 조건을 포함한 요청 객체
+     * @return 스레드별로 그룹화된 채팅 히스토리 목록
+     */
+    suspend fun getChatHistory(request: ChatHistoryListRequest): ChatHistoryListResponse {
+        val offset = request.page * request.size
+
+        val threads = if (request.isAdmin) {
+            if (request.sortDirection == SortDirection.DESC) {
+                threadRepository.findAllWithPaginationDesc(request.size, offset)
+            } else {
+                threadRepository.findAllWithPaginationAsc(request.size, offset)
+            }
+        } else {
+            val userId = request.userId
+                ?: throw IllegalArgumentException("일반 사용자는 userId가 필수입니다.")
+
+            if (request.sortDirection == SortDirection.DESC) {
+                threadRepository.findAllByUserIdWithPaginationDesc(userId, request.size, offset)
+            } else {
+                threadRepository.findAllByUserIdWithPaginationAsc(userId, request.size, offset)
+            }
+        }.collectList().awaitSingle()
+
+        val threadsWithChats = threads.map { thread ->
+            val chats = chatHistoryRepository
+                .findAllByThreadIdOrderByCreatedAtAsc(thread.id!!)
+                .map { chatHistory ->
+                    ChatHistoryDto(
+                        id = chatHistory.id!!,
+                        userMessage = chatHistory.userMessage,
+                        assistantMessage = chatHistory.assistantMessage,
+                        createdAt = chatHistory.createdAt
+                    )
+                }
+                .collectList()
+                .awaitSingle()
+
+            ThreadWithChatsDto(
+                threadId = thread.id,
+                userId = thread.userId,
+                createdAt = thread.createdAt,
+                updatedAt = thread.updatedAt,
+                chats = chats
+            )
+        }
+
+        return ChatHistoryListResponse(
+            threads = threadsWithChats,
+            page = request.page,
+            size = request.size,
+            totalElements = threads.size.toLong()
+        )
+    }
+
+    /**
+     * 스레드를 삭제합니다.
+     *
+     * 스레드에 속한 모든 채팅 히스토리도 함께 삭제됩니다.
+     * 사용자는 본인의 스레드만 삭제할 수 있습니다.
+     *
+     * @param request 삭제할 스레드 정보를 포함한 요청 객체
+     * @throws IllegalArgumentException 권한이 없거나 존재하지 않는 스레드인 경우
+     */
+    suspend fun deleteThread(request: ThreadDeleteRequest) {
+        val exists = threadRepository
+            .existsByIdAndUserId(request.threadId, request.userId)
+            .awaitSingle()
+
+        if (!exists) {
+            throw IllegalArgumentException(
+                "권한이 없거나 존재하지 않는 스레드입니다. threadId: ${request.threadId}, userId: ${request.userId}"
+            )
+        }
+
+        chatHistoryRepository.deleteAllByThreadId(request.threadId).collectList().awaitSingle()
+        threadRepository.deleteById(request.threadId).awaitSingleOrNull()
+    }
+
+    /**
+     * 사용자의 최신 스레드를 가져오거나 새로 생성합니다.
+     *
+     * 30분 규칙을 적용하여 기존 스레드를 재사용하거나 새 스레드를 생성합니다.
+     *
+     * @param userId 사용자 ID
+     * @return 활성 스레드
+     */
+    private suspend fun getOrCreateThread(userId: String): Thread {
+        val latestThread = threadRepository.findLatestByUserId(userId).awaitSingleOrNull()
+        val now = OffsetDateTime.now(ZoneOffset.UTC)
+
+        return if (latestThread == null) {
+            val newThread = Thread(
+                userId = userId,
+                createdAt = now,
+                updatedAt = now
+            )
+            threadRepository.save(newThread).awaitSingle()
+        } else {
+            val needsNewThread = latestThread.updatedAt
+                .plusMinutes(THREAD_TIMEOUT_MINUTES)
+                .isBefore(now)
+
+            if (needsNewThread) {
+                val newThread = Thread(
+                    userId = userId,
+                    createdAt = now,
+                    updatedAt = now
+                )
+                threadRepository.save(newThread).awaitSingle()
+            } else {
+                latestThread
+            }
+        }
     }
 }
