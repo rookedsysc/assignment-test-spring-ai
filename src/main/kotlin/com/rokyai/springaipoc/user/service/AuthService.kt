@@ -45,12 +45,14 @@ class AuthService(
                     )
                     
                     loginHistoryRepository.save(LoginHistory(userId = user.id))
-                        .thenReturn(
-                            TokenResponse(
-                                accessToken = token,
-                                expiresIn = jwtUtil.getExpirationInSeconds()
+                        .flatMap {
+                            Mono.just(
+                                TokenResponse(
+                                    accessToken = token,
+                                    expiresIn = jwtUtil.getExpirationInSeconds()
+                                )
                             )
-                        )
+                        }
                 }
             }
     }
