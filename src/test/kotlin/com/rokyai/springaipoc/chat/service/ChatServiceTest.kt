@@ -8,6 +8,7 @@ import com.rokyai.springaipoc.chat.repository.ChatHistoryRepository
 import com.rokyai.springaipoc.chat.repository.ThreadRepository
 import io.mockk.every
 import io.mockk.mockk
+import kotlinx.coroutines.reactor.awaitSingle
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.BeforeEach
@@ -77,7 +78,7 @@ class ChatServiceTest {
         every { mockCallResponseSpec.content() } returns expectedResponse
 
         // When - ChatService를 통해 메시지 전송
-        val response = chatService.chat(request, userId)
+        val response = chatService.chat(request, userId).collectList().awaitSingle().first()
 
         // Then - 응답이 정상적으로 반환되는지 검증
         assertNotNull(response)
@@ -104,7 +105,7 @@ class ChatServiceTest {
         // When & Then - 예외가 전파되는지 검증
         val exception = assertThrows(RuntimeException::class.java) {
             runTest {
-                chatService.chat(request, userId)
+                chatService.chat(request, userId).collectList().awaitSingle()
             }
         }
 
@@ -132,7 +133,7 @@ class ChatServiceTest {
         every { mockCallResponseSpec.content() } returns expectedResponse
 
         // When - 빈 메시지 전송
-        val response = chatService.chat(request, userId)
+        val response = chatService.chat(request, userId).collectList().awaitSingle().first()
 
         // Then - 응답이 정상적으로 반환되는지 검증
         assertNotNull(response)

@@ -1,6 +1,7 @@
 package com.rokyai.springaipoc.chat.controller
 
 import com.rokyai.springaipoc.chat.dto.*
+import com.rokyai.springaipoc.chat.service.AdminChatService
 import com.rokyai.springaipoc.chat.service.ChatService
 import com.rokyai.springaipoc.chat.util.SecurityUtil
 import io.swagger.v3.oas.annotations.Operation
@@ -25,7 +26,8 @@ import reactor.core.publisher.Flux
 @RequestMapping("/api/v1/chat")
 @Tag(name = "Chat API", description = "AI와 대화하는 API")
 class ChatController(
-    private val chatService: ChatService
+    private val chatService: ChatService,
+    private val adminChatService: AdminChatService
 ) {
     /**
      * AI와 대화합니다.
@@ -34,7 +36,7 @@ class ChatController(
      * 스레드 관리 로직(30분 규칙)을 통해 대화 컨텍스트를 유지합니다.
      *
      * @param request 사용자가 보낼 메시지와 옵션을 포함한 요청 객체
-     * @return isStreaming=false인 경우 ChatResponse, isStreaming=true인 경우 Flux<String>
+     * @return isStreaming=false인 경우 ChatResponse, isStreaming=true인 경우 Flux<ChatResponse>
      */
     @PostMapping(produces = [MediaType.APPLICATION_JSON_VALUE, MediaType.TEXT_EVENT_STREAM_VALUE])
     @ResponseStatus(HttpStatus.OK)
@@ -65,7 +67,7 @@ class ChatController(
             )
         ]
     )
-    suspend fun chat(@Valid @RequestBody request: ChatRequest): Any {
+    suspend fun chat(@Valid @RequestBody request: ChatRequest): Flux<ChatResponse> {
         val userId = SecurityUtil.requireCurrentUserId()
         return if (request.isStreaming) {
             chatService.chatStream(request, userId)
@@ -112,12 +114,12 @@ class ChatController(
         ]
     )
     suspend fun getChatHistory(@Valid @RequestBody request: ChatHistoryListRequest): ChatHistoryListResponse {
-        val userId = if (request.isAdmin) {
-            null
+        return if (request.isAdmin) {
+            adminChatService.getAllChatHistory(request)
         } else {
-            SecurityUtil.requireCurrentUserId().toString()
+            val userId = SecurityUtil.requireCurrentUserId().toString()
+            chatService.getChatHistory(request.copy(userId = userId))
         }
-        return chatService.getChatHistory(request.copy(userId = userId))
     }
 
     /**

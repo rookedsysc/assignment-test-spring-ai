@@ -44,7 +44,7 @@ class ChatService(
      * @param userId 사용자 ID (Spring Security에서 추출)
      * @return AI의 응답 메시지를 포함한 응답 객체
      */
-    suspend fun chat(request: ChatRequest, userId: UUID): ChatResponse {
+    suspend fun chat(request: ChatRequest, userId: UUID): Flux<ChatResponse> {
         val chatClient = chatClientFactory.getClient(request.provider)
         val chatOptions = chatClientFactory.getOptions(request.provider)
 
@@ -88,7 +88,7 @@ class ChatService(
             thread.copy(updatedAt = OffsetDateTime.now(ZoneOffset.UTC))
         ).awaitSingle()
 
-        return ChatResponse(message = generatedMessage)
+        return Flux.just(ChatResponse(message = generatedMessage, threadId = thread.id))
     }
 
     /**
@@ -101,7 +101,7 @@ class ChatService(
      * @param userId 사용자 ID (Spring Security에서 추출)
      * @return AI의 응답 메시지 스트림
      */
-    fun chatStream(request: ChatRequest, userId: UUID): Flux<String> {
+    fun chatStream(request: ChatRequest, userId: UUID): Flux<ChatResponse> {
         val messageBuilder = StringBuilder()
         val userIdString = userId.toString()
 
@@ -159,6 +159,7 @@ class ChatService(
                                 }
                                     .filter { text -> text.isNotBlank() }
                                     .doOnNext { text -> messageBuilder.append(text) }
+                                    .map { text -> ChatResponse(message = text, threadId = activeThread.id) }
                                     .doOnComplete {
                                         val chatHistory = ChatHistory(
                                             threadId = activeThread.id,
@@ -178,7 +179,7 @@ class ChatService(
             }
             .onErrorResume { error ->
                 val errorMessage = error.message ?: "알 수 없는 오류가 발생했습니다."
-                Flux.just("Error: $errorMessage")
+                Flux.just(ChatResponse(message = "Error: $errorMessage"))
             }
     }
 
@@ -186,29 +187,20 @@ class ChatService(
      * 채팅 히스토리를 조회합니다.
      *
      * 스레드 단위로 그룹화되어 반환되며, 페이지네이션과 정렬을 지원합니다.
-     * 일반 사용자는 본인의 히스토리만, 관리자는 모든 히스토리를 조회할 수 있습니다.
+     * 일반 사용자는 본인의 히스토리만 조회할 수 있습니다.
      *
      * @param request 조회 조건을 포함한 요청 객체
      * @return 스레드별로 그룹화된 채팅 히스토리 목록
      */
     suspend fun getChatHistory(request: ChatHistoryListRequest): ChatHistoryListResponse {
         val offset = request.page * request.size
+        val userId = request.userId
+            ?: throw IllegalArgumentException("userId가 필수입니다.")
 
-        val threads = if (request.isAdmin) {
-            if (request.sortDirection == SortDirection.DESC) {
-                threadRepository.findAllWithPaginationDesc(request.size, offset)
-            } else {
-                threadRepository.findAllWithPaginationAsc(request.size, offset)
-            }
+        val threads = if (request.sortDirection == SortDirection.DESC) {
+            threadRepository.findAllByUserIdWithPaginationDesc(userId, request.size, offset)
         } else {
-            val userId = request.userId
-                ?: throw IllegalArgumentException("일반 사용자는 userId가 필수입니다.")
-
-            if (request.sortDirection == SortDirection.DESC) {
-                threadRepository.findAllByUserIdWithPaginationDesc(userId, request.size, offset)
-            } else {
-                threadRepository.findAllByUserIdWithPaginationAsc(userId, request.size, offset)
-            }
+            threadRepository.findAllByUserIdWithPaginationAsc(userId, request.size, offset)
         }.collectList().awaitSingle()
 
         val threadsWithChats = threads.map { thread ->

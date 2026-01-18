@@ -10,7 +10,9 @@ import com.rokyai.springaipoc.chat.enums.SortDirection
 import com.rokyai.springaipoc.chat.factory.ChatClientFactory
 import com.rokyai.springaipoc.chat.repository.ChatHistoryRepository
 import com.rokyai.springaipoc.chat.repository.ThreadRepository
+import com.rokyai.springaipoc.chat.dto.ChatResponse
 import io.mockk.*
+import kotlinx.coroutines.reactor.awaitSingle
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.BeforeEach
@@ -44,6 +46,7 @@ class ChatServiceEnhancedTest {
     private val openAiChatClient: ChatClient = mockk()
     private val perplexityChatClient: ChatClient = mockk()
     private lateinit var chatService: ChatService
+    private lateinit var adminChatService: AdminChatService
 
     @BeforeEach
     fun setup() {
@@ -52,6 +55,10 @@ class ChatServiceEnhancedTest {
             chatHistoryRepository = chatHistoryRepository,
             threadRepository = threadRepository,
             chatClientFactory = chatClientFactory
+        )
+        adminChatService = AdminChatService(
+            chatHistoryRepository = chatHistoryRepository,
+            threadRepository = threadRepository
         )
     }
 
@@ -93,7 +100,7 @@ class ChatServiceEnhancedTest {
         every { mockCallResponseSpec.content() } returns "응답입니다"
 
         // When
-        val response = chatService.chat(request, userId)
+        val response = chatService.chat(request, userId).collectList().awaitSingle().first()
 
         // Then - 새 스레드가 생성되었는지 확인 (생성 1회 + 업데이트 1회 = 총 2회)
         verify(exactly = 2) { threadRepository.save(any()) }
@@ -139,7 +146,7 @@ class ChatServiceEnhancedTest {
         every { mockCallResponseSpec.content() } returns "응답입니다"
 
         // When
-        val response = chatService.chat(request, userId)
+        val response = chatService.chat(request, userId).collectList().awaitSingle().first()
 
         // Then - 기존 스레드가 재사용되고, updatedAt만 갱신되었는지 확인 (업데이트 1회만)
         verify(exactly = 1) { threadRepository.save(match { it.id == existingThreadId }) }
@@ -193,7 +200,7 @@ class ChatServiceEnhancedTest {
         every { mockCallResponseSpec.content() } returns "응답입니다"
 
         // When
-        val response = chatService.chat(request, userId)
+        val response = chatService.chat(request, userId).collectList().awaitSingle().first()
 
         // Then - 새 스레드가 생성되었는지 확인 (생성 1회 + 업데이트 1회 = 총 2회, 기존 스레드 ID와 다름)
         verify(atLeast = 1) { threadRepository.save(match { it.id != oldThreadId }) }
@@ -233,7 +240,7 @@ class ChatServiceEnhancedTest {
         every { mockCallResponseSpec.content() } returns "완전한 응답"
 
         // When
-        val response = chatService.chat(request, userId)
+        val response = chatService.chat(request, userId).collectList().awaitSingle().first()
 
         // Then
         assertNotNull(response)
@@ -276,8 +283,8 @@ class ChatServiceEnhancedTest {
 
         // Then
         StepVerifier.create(responseFlux)
-            .expectNext("스트리밍 ")
-            .expectNext("응답")
+            .expectNext(ChatResponse("스트리밍 ", threadId))
+            .expectNext(ChatResponse("응답", threadId))
             .verifyComplete()
     }
 
@@ -313,7 +320,7 @@ class ChatServiceEnhancedTest {
         every { mockCallResponseSpec.content() } returns "Perplexity 응답"
 
         // When
-        val response = chatService.chat(request, userId)
+        val response = chatService.chat(request, userId).collectList().awaitSingle().first()
 
         // Then - OpenAI가 아닌 Perplexity ChatClient가 사용되었는지 확인
         verify(exactly = 1) { perplexityChatClient.prompt() }
@@ -402,7 +409,7 @@ class ChatServiceEnhancedTest {
         )
 
         // When
-        val response = chatService.getChatHistory(request)
+        val response = adminChatService.getAllChatHistory(request)
 
         // Then
         assertNotNull(response)
