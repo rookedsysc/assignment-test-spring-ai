@@ -1,0 +1,39 @@
+spring:
+  ai:
+    openai:
+      api-key: test-key
+      chat:
+        options:
+          model: gpt-4
+  main:
+    allow-bean-definition-overriding: true
+  r2dbc:
+    url: r2dbc:postgresql://localhost:5432/testdb
+    username: test
+    password: test
+  sql:
+    init:
+      mode: always
+
+app:
+  openai:
+    api-key: test-key
+    chat:
+      model: gpt-4
+  perplexity:
+    api-key: test-key
+    base-url: https://api.perplexity.ai
+    chat:
+      model: sonar-reasoning-pro
+  gemini:
+    api-key: test-key
+    base-url: https://generativelanguage.googleapis.com
+
+jwt:
+  secret: testSecretKeyForJWTTokenGenerationAndValidationPurposesOnly123456789
+  expiration: 3600000  # 1 hour in milliseconds
+
+logging:
+  level:
+    org.springframework.ai: INFO
+    io.modelcontextprotocol: INFO
