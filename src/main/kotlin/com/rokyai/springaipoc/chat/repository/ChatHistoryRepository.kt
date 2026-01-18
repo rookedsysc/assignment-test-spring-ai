@@ -5,6 +5,8 @@ import org.springframework.data.r2dbc.repository.Query
 import org.springframework.data.repository.reactive.ReactiveCrudRepository
 import org.springframework.stereotype.Repository
 import reactor.core.publisher.Flux
+import reactor.core.publisher.Mono
+import java.time.OffsetDateTime
 import java.util.UUID
 
 /**
@@ -39,4 +41,22 @@ interface ChatHistoryRepository : ReactiveCrudRepository<ChatHistory, UUID> {
      */
     @Query("DELETE FROM chat_history WHERE thread_id = :threadId")
     fun deleteAllByThreadId(threadId: UUID): Flux<Void>
+
+    /**
+     * 특정 시간 이후 생성된 채팅 히스토리 수 조회
+     *
+     * @param since 기준 시간
+     * @return 채팅 히스토리 수
+     */
+    @Query("SELECT COUNT(*) FROM chat_history WHERE created_at >= :since")
+    fun countByCreatedAtAfter(since: OffsetDateTime): Mono<Long>
+
+    /**
+     * 특정 시간 이후 생성된 채팅 히스토리 목록 조회
+     *
+     * @param since 기준 시간
+     * @return 채팅 히스토리 목록
+     */
+    @Query("SELECT * FROM chat_history WHERE created_at >= :since ORDER BY created_at DESC")
+    fun findAllByCreatedAtAfter(since: OffsetDateTime): Flux<ChatHistory>
 }
