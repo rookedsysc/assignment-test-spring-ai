@@ -51,38 +51,6 @@ enum class ChatProvider(
     
     companion object {
         /**
-         * 제공자 이름과 모델 이름으로 ChatProvider를 찾습니다.
-         *
-         * @param providerName 제공자 이름
-         * @param modelName 모델 이름
-         * @return 일치하는 ChatProvider
-         * @throws IllegalArgumentException 지원하지 않는 제공자나 모델인 경우
-         */
-        fun fromProviderAndModel(providerName: String, modelName: String): ChatProvider {
-            return entries.find { 
-                it.providerName.equals(providerName, ignoreCase = true) && 
-                it.modelName.equals(modelName, ignoreCase = true) 
-            } ?: throw IllegalArgumentException(
-                "지원하지 않는 제공자 또는 모델입니다. provider: $providerName, model: $modelName"
-            )
-        }
-        
-        /**
-         * 모델 이름으로 ChatProvider를 찾습니다.
-         *
-         * @param modelName 모델 이름
-         * @return 일치하는 ChatProvider
-         * @throws IllegalArgumentException 지원하지 않는 모델인 경우
-         */
-        fun fromModel(modelName: String): ChatProvider {
-            return entries.find { 
-                it.modelName.equals(modelName, ignoreCase = true) 
-            } ?: throw IllegalArgumentException(
-                "지원하지 않는 모델입니다. model: $modelName"
-            )
-        }
-        
-        /**
          * 기본 ChatProvider를 반환합니다.
          *
          * @return OpenAI GPT-4o

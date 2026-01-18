@@ -54,6 +54,7 @@ class SecurityConfig(
                     .pathMatchers("/admin/auth/**").permitAll()
                     .pathMatchers("/swagger-ui/**", "/v3/api-docs/**", "/webjars/**").permitAll()
                     .pathMatchers("/admin/**").hasRole("ADMIN")
+                    .pathMatchers("/api/**").hasRole("MEMBER")
                     .anyExchange().authenticated()
             }
             .exceptionHandling { exceptions ->
