@@ -41,3 +41,13 @@ CREATE TABLE IF NOT EXISTS chat_history
 CREATE INDEX IF NOT EXISTS idx_chat_history_thread_id ON chat_history (thread_id);
 CREATE INDEX IF NOT EXISTS idx_chat_history_user_id ON chat_history (user_id);
 CREATE INDEX IF NOT EXISTS idx_chat_history_created_at ON chat_history (created_at);
+
+-- Login History table
+CREATE TABLE IF NOT EXISTS login_history (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_login_history_user_id ON login_history(user_id);
+CREATE INDEX IF NOT EXISTS idx_login_history_created_at ON login_history(created_at);

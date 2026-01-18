@@ -10,6 +10,9 @@ import org.springframework.security.crypto.password.PasswordEncoder
 import org.springframework.stereotype.Service
 import reactor.core.publisher.Mono
 
+import com.rokyai.springaipoc.user.repository.LoginHistoryRepository
+import com.rokyai.springaipoc.user.entity.LoginHistory
+
 /**
  * 인증 관련 서비스
  */
@@ -17,7 +20,8 @@ import reactor.core.publisher.Mono
 class AuthService(
     private val userRepository: UserRepository,
     private val passwordEncoder: PasswordEncoder,
-    private val jwtUtil: JwtUtil
+    private val jwtUtil: JwtUtil,
+    private val loginHistoryRepository: LoginHistoryRepository
 ) {
     /**
      * 로그인
@@ -39,12 +43,16 @@ class AuthService(
                         email = user.email,
                         role = user.role
                     )
-                    Mono.just(
-                        TokenResponse(
-                            accessToken = token,
-                            expiresIn = jwtUtil.getExpirationInSeconds()
-                        )
-                    )
+                    
+                    loginHistoryRepository.save(LoginHistory(userId = user.id))
+                        .flatMap {
+                            Mono.just(
+                                TokenResponse(
+                                    accessToken = token,
+                                    expiresIn = jwtUtil.getExpirationInSeconds()
+                                )
+                            )
+                        }
                 }
             }
     }
