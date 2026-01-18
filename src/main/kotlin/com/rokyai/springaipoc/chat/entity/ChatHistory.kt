@@ -23,6 +23,18 @@ data class ChatHistory(
     val id: UUID? = null,
 
     /**
+     * 이 대화가 속한 스레드 ID
+     */
+    @Column("thread_id")
+    val threadId: UUID,
+
+    /**
+     * 대화를 시작한 사용자 ID
+     */
+    @Column("user_id")
+    val userId: String,
+
+    /**
      * 사용자가 입력한 메시지
      */
     @Column("user_message")
